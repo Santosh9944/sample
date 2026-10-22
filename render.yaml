@@ -3,7 +3,7 @@ services:
     name: verifai
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app --workers 1 --timeout 180 --preload
+    startCommand: gunicorn app:app --workers 1 --timeout 120
     envVars:
       - key: PYTHON_VERSION
         value: "3.11.9"
