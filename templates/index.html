@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="VerifAI – Advanced multimodal fake news detection using Deep Learning. Analyse text, images, and videos to identify misinformation instantly." />
+  <meta name="keywords" content="fake news detection, deep learning, AI, NLP, BERT, image analysis, video analysis, fact check" />
+  <title>VerifAI – Multimodal Fake News Detection System</title>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+  <!-- Chart.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+</head>
+
+<body>
+  <!-- ===================== ANIMATED BACKGROUND ===================== -->
+  <div class="bg-canvas" aria-hidden="true">
+    <div class="orb orb-purple"></div>
+    <div class="orb orb-cyan"></div>
+    <div class="orb orb-pink"></div>
+    <div class="grid-mesh"></div>
+  </div>
+
+  <!-- ===================== NAV ===================== -->
+  <nav class="navbar" role="navigation" aria-label="Main navigation">
+    <div class="nav-inner">
+      <a class="nav-brand" href="#" aria-label="VerifAI home">
+        <div class="brand-hex">
+          <svg width="26" height="26" viewBox="0 0 26 26" fill="none" aria-hidden="true">
+            <path d="M13 1L24.2 7.5V20.5L13 27L1.8 20.5V7.5L13 1Z" stroke="#7c3aed" stroke-width="1.5" fill="rgba(124,58,237,0.12)"/>
+            <path d="M13 7L17.5 9.75V15.25L13 18L8.5 15.25V9.75L13 7Z" fill="#7c3aed" opacity="0.9"/>
+            <circle cx="13" cy="12.5" r="2" fill="white"/>
+          </svg>
+        </div>
+        <span>Verif<em>AI</em></span>
+      </a>
+
+      <div class="nav-links">
+        <a href="#analyze" class="nav-link" id="nav-analyze">Analyze</a>
+        <a href="#how-it-works" class="nav-link" id="nav-how">How It Works</a>
+        <a href="#about" class="nav-link" id="nav-about">About</a>
+      </div>
+
+      <div class="nav-pill">
+        <span class="pill-dot" aria-hidden="true"></span>
+        DL Powered
+      </div>
+    </div>
+  </nav>
+
+  <!-- ===================== HERO ===================== -->
+  <section class="hero" id="hero" aria-labelledby="hero-heading">
+    <div class="hero-left">
+      <div class="hero-tag" aria-label="Project type">
+        <span aria-hidden="true">🧠</span> Multimodal Deep Learning System
+      </div>
+      <h1 class="hero-title" id="hero-heading">
+        Detect <span class="grad-text">Fake News</span><br />
+        With AI Precision
+      </h1>
+      <p class="hero-sub">
+        State-of-the-art transformer &amp; computer-vision pipeline that analyses
+        <strong>text</strong>, <strong>images</strong>, and <strong>videos</strong>
+        simultaneously to identify misinformation with high confidence.
+      </p>
+
+      <div class="hero-stats" role="list" aria-label="System capabilities">
+        <div class="hs-item" role="listitem">
+          <span class="hs-val">BERT</span>
+          <span class="hs-lab">Text Model</span>
+        </div>
+        <div class="hs-sep" aria-hidden="true"></div>
+        <div class="hs-item" role="listitem">
+          <span class="hs-val">ELA</span>
+          <span class="hs-lab">Image Analysis</span>
+        </div>
+        <div class="hs-sep" aria-hidden="true"></div>
+        <div class="hs-item" role="listitem">
+          <span class="hs-val">CNN</span>
+          <span class="hs-lab">Video Frames</span>
+        </div>
+        <div class="hs-sep" aria-hidden="true"></div>
+        <div class="hs-item" role="listitem">
+          <span class="hs-val">3</span>
+          <span class="hs-lab">Modalities</span>
+        </div>
+      </div>
+
+      <a href="#analyze" class="hero-cta" id="hero-cta-btn" aria-label="Go to analyzer">
+        Start Analyzing
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+          <path d="M5 12h14M12 5l7 7-7 7"/>
+        </svg>
+      </a>
+    </div>
+
+    <div class="hero-right" aria-hidden="true">
+      <div class="detector-anim">
+        <div class="da-ring da-r1"></div>
+        <div class="da-ring da-r2"></div>
+        <div class="da-ring da-r3"></div>
+        <div class="da-core">
+          <span class="da-icon">🔍</span>
+        </div>
+        <div class="da-dot da-d1"></div>
+        <div class="da-dot da-d2"></div>
+        <div class="da-dot da-d3"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== ANALYZE SECTION ===================== -->
+  <section class="analyze-section" id="analyze" aria-labelledby="analyze-heading">
+    <div class="container">
+      <header class="section-header">
+        <h2 id="analyze-heading">Analyze Content</h2>
+        <p>Upload text, image, or video — or combine all three for maximum accuracy</p>
+      </header>
+
+      <form id="analysisForm" class="analysis-form" enctype="multipart/form-data" novalidate>
+        <!-- MODALITY TABS -->
+        <div class="mod-tabs" role="tablist" aria-label="Input modality">
+          <button type="button" class="mod-tab active" role="tab" aria-selected="true"
+                  aria-controls="panel-text" id="tab-text" data-panel="panel-text">
+            <span class="mt-icon" aria-hidden="true">📝</span>
+            <span class="mt-label">Text</span>
+            <span class="mt-badge" id="badge-text" aria-live="polite"></span>
+          </button>
+          <button type="button" class="mod-tab" role="tab" aria-selected="false"
+                  aria-controls="panel-image" id="tab-image" data-panel="panel-image">
+            <span class="mt-icon" aria-hidden="true">🖼️</span>
+            <span class="mt-label">Image</span>
+            <span class="mt-badge" id="badge-image" aria-live="polite"></span>
+          </button>
+          <button type="button" class="mod-tab" role="tab" aria-selected="false"
+                  aria-controls="panel-video" id="tab-video" data-panel="panel-video">
+            <span class="mt-icon" aria-hidden="true">🎥</span>
+            <span class="mt-label">Video</span>
+            <span class="mt-badge" id="badge-video" aria-live="polite"></span>
+          </button>
+        </div>
+
+        <!-- PANELS -->
+        <div class="panels-wrap">
+          <!-- TEXT PANEL -->
+          <div class="panel active" id="panel-text" role="tabpanel" aria-labelledby="tab-text">
+            <div class="input-card">
+              <div class="ic-header">
+                <span>📰 Paste News Article or Text</span>
+                <button type="button" class="clear-btn" id="clearText" aria-label="Clear text input">Clear</button>
+              </div>
+              <textarea id="newsText" name="text"
+                placeholder="Paste a news article, tweet, or any suspicious text here…&#10;&#10;Tip: More text → more accurate analysis."
+                class="text-input" rows="10" aria-label="News text input"></textarea>
+              <div class="ic-footer">
+                <span id="charCount" class="char-count" aria-live="polite">0 characters</span>
+                <span class="ic-tip">💡 Include headlines &amp; body text for best results</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- IMAGE PANEL -->
+          <div class="panel" id="panel-image" role="tabpanel" aria-labelledby="tab-image" hidden>
+            <div class="input-card">
+              <div class="ic-header">
+                <span>🖼️ Upload Suspect Image</span>
+                <button type="button" class="clear-btn" id="clearImage" aria-label="Clear image input">Clear</button>
+              </div>
+              <div class="dropzone" id="imageDropzone" role="button" tabindex="0"
+                   aria-label="Drop image here or click to browse">
+                <input type="file" id="imageFile" name="image" accept="image/*" class="file-input" aria-hidden="true" />
+                <div class="dz-content" id="imgDzContent">
+                  <div class="dz-icon" aria-hidden="true">🖼️</div>
+                  <h3>Drag &amp; Drop Image</h3>
+                  <p>or <button type="button" class="browse-link" id="browseImage">browse files</button></p>
+                  <span class="dz-types">JPG · PNG · WebP · GIF · BMP</span>
+                </div>
+                <div class="dz-preview" id="imgPreview" style="display:none">
+                  <img id="previewImg" src="" alt="Uploaded image preview" />
+                  <div class="dz-overlay">
+                    <span id="imgName" class="dz-filename"></span>
+                    <span id="imgSize" class="dz-filesize"></span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- VIDEO PANEL -->
+          <div class="panel" id="panel-video" role="tabpanel" aria-labelledby="tab-video" hidden>
+            <div class="input-card">
+              <div class="ic-header">
+                <span>🎥 Upload Suspect Video</span>
+                <button type="button" class="clear-btn" id="clearVideo" aria-label="Clear video input">Clear</button>
+              </div>
+              <div class="dropzone" id="videoDropzone" role="button" tabindex="0"
+                   aria-label="Drop video here or click to browse">
+                <input type="file" id="videoFile" name="video" accept="video/*" class="file-input" aria-hidden="true" />
+                <div class="dz-content" id="vidDzContent">
+                  <div class="dz-icon" aria-hidden="true">🎬</div>
+                  <h3>Drag &amp; Drop Video</h3>
+                  <p>or <button type="button" class="browse-link" id="browseVideo">browse files</button></p>
+                  <span class="dz-types">MP4 · AVI · MOV · WebM · MKV &nbsp;(max 150 MB)</span>
+                </div>
+                <div class="dz-preview video-info-preview" id="vidPreview" style="display:none">
+                  <div class="vip-card">
+                    <span class="vip-icon" aria-hidden="true">🎬</span>
+                    <div class="vip-details">
+                      <span id="vidName" class="vip-name"></span>
+                      <span id="vidSize" class="vip-size"></span>
+                    </div>
+                    <span class="vip-ready" aria-label="Video ready">✓ Ready</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ACTIVE MODALITIES INDICATOR -->
+        <div class="active-inputs" id="activeInputs" aria-live="polite" aria-label="Currently active inputs">
+          <span class="ai-label">Active inputs:</span>
+          <div class="ai-chips" id="aiChips">
+            <span class="ai-empty">No input yet — add text, image or video above</span>
+          </div>
+        </div>
+
+        <!-- ANALYZE BUTTON -->
+        <div class="analyze-wrap">
+          <button type="submit" class="analyze-btn" id="analyzeBtn" aria-label="Analyze content for fake news">
+            <span class="ab-icon" aria-hidden="true">🔍</span>
+            <span class="ab-text">Analyze Content</span>
+            <div class="ab-shimmer" aria-hidden="true"></div>
+          </button>
+          <p class="analyze-hint">All provided inputs will be analysed simultaneously using DL models</p>
+        </div>
+      </form>
+
+      <!-- ===================== LOADING ===================== -->
+      <div class="loading-wrap" id="loadingWrap" style="display:none" role="status" aria-label="Analyzing content">
+        <div class="loading-card">
+          <div class="neural-anim" aria-hidden="true">
+            <div class="na-node na-n1"></div>
+            <div class="na-node na-n2"></div>
+            <div class="na-node na-n3"></div>
+            <svg class="na-lines" viewBox="0 0 200 80">
+              <line x1="30" y1="40" x2="100" y2="20" class="na-line" />
+              <line x1="30" y1="40" x2="100" y2="60" class="na-line" />
+              <line x1="100" y1="20" x2="170" y2="40" class="na-line" />
+              <line x1="100" y1="60" x2="170" y2="40" class="na-line" />
+            </svg>
+          </div>
+          <h3 class="loading-title">Deep Learning Analysis in Progress</h3>
+          <div class="loading-steps" id="loadingSteps" aria-live="polite"></div>
+          <div class="lp-bar-wrap">
+            <div class="lp-bar" id="loadingBar"></div>
+          </div>
+          <p class="loading-note">First run may take longer while models are downloaded</p>
+        </div>
+      </div>
+
+      <!-- ===================== RESULTS ===================== -->
+      <div class="results-wrap" id="resultsWrap" style="display:none" aria-label="Analysis results" role="region">
+
+        <!-- VERDICT CARD -->
+        <div class="verdict-card" id="verdictCard">
+          <div class="vc-left">
+            <div class="vc-emoji" id="vcEmoji" aria-hidden="true">🔍</div>
+            <div class="vc-info">
+              <span class="vc-label">Analysis Complete</span>
+              <h2 class="vc-verdict" id="vcVerdict">—</h2>
+              <span class="vc-sub" id="vcSub"></span>
+            </div>
+          </div>
+          <div class="vc-badge" id="vcBadge" aria-live="polite">—</div>
+        </div>
+
+        <!-- PROBABILITY BARS -->
+        <div class="prob-bars" role="group" aria-label="Probability breakdown">
+          <div class="pb-row">
+            <span class="pb-label">Fake Probability</span>
+            <div class="pb-track">
+              <div class="pb-fill fake-fill" id="fakeBar" role="progressbar" aria-valuemin="0" aria-valuemax="100"></div>
+            </div>
+            <span class="pb-val" id="fakeProbVal">—</span>
+          </div>
+          <div class="pb-row">
+            <span class="pb-label">Real Probability</span>
+            <div class="pb-track">
+              <div class="pb-fill real-fill" id="realBar" role="progressbar" aria-valuemin="0" aria-valuemax="100"></div>
+            </div>
+            <span class="pb-val" id="realProbVal">—</span>
+          </div>
+        </div>
+
+        <!-- META ROW -->
+        <div class="meta-row" role="group" aria-label="Analysis metadata">
+          <div class="mr-item">
+            <span class="mr-label">Risk Level</span>
+            <span class="mr-val risk-badge" id="riskBadge">—</span>
+          </div>
+          <div class="mr-item">
+            <span class="mr-label">Confidence</span>
+            <span class="mr-val" id="confidenceVal">—</span>
+          </div>
+          <div class="mr-item">
+            <span class="mr-label">Modalities</span>
+            <span class="mr-val" id="modalitiesVal">—</span>
+          </div>
+          <div class="mr-item">
+            <span class="mr-label">Fusion Method</span>
+            <span class="mr-val" id="fusionVal">—</span>
+          </div>
+        </div>
+
+        <!-- CHARTS -->
+        <div class="charts-row">
+          <div class="chart-card">
+            <h3>Verdict Distribution</h3>
+            <div class="chart-wrap">
+              <canvas id="verdictChart" aria-label="Fake vs Real probability donut chart"></canvas>
+            </div>
+          </div>
+          <div class="chart-card">
+            <h3>Modality Scores</h3>
+            <div class="chart-wrap">
+              <canvas id="modalityChart" aria-label="Per-modality fake probability bar chart"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- MODALITY BREAKDOWN -->
+        <section class="breakdown-section" id="breakdownSection">
+          <h3 class="sec-title">📊 Modality Breakdown</h3>
+          <div class="breakdown-cards" id="breakdownCards" role="list"></div>
+        </section>
+
+        <!-- MANIPULATION INDICATORS -->
+        <section class="indicators-section" id="indicatorsSection" style="display:none">
+          <h3 class="sec-title">⚠️ Detection Signals</h3>
+          <ul class="indicators-list" id="indicatorsList" role="list"></ul>
+        </section>
+
+        <!-- TEXT FEATURES -->
+        <section class="features-section" id="textFeaturesSection" style="display:none">
+          <h3 class="sec-title">📝 Linguistic Feature Analysis</h3>
+          <div class="features-grid" id="textFeaturesGrid" role="list"></div>
+        </section>
+
+        <!-- IMAGE DETAILS -->
+        <section class="features-section" id="imageDetailsSection" style="display:none">
+          <h3 class="sec-title">🖼️ Image Forensic Details</h3>
+          <div class="features-grid" id="imageDetailsGrid" role="list"></div>
+        </section>
+
+        <!-- VIDEO DETAILS -->
+        <section class="features-section" id="videoDetailsSection" style="display:none">
+          <h3 class="sec-title">🎥 Video Temporal Analysis</h3>
+          <div class="features-grid" id="videoDetailsGrid" role="list"></div>
+          <div class="frame-chart-wrap" id="frameChartWrap" style="display:none">
+            <h4>Frame-by-Frame Fake Probability</h4>
+            <canvas id="frameChart" aria-label="Frame-by-frame fake probability line chart"></canvas>
+          </div>
+        </section>
+
+        <!-- RE-ANALYZE -->
+        <div class="re-analyze">
+          <button class="re-analyze-btn" id="reAnalyzeBtn" aria-label="Analyze another piece of content">
+            🔄 Analyze Another
+          </button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== HOW IT WORKS ===================== -->
+  <section class="how-section" id="how-it-works" aria-labelledby="how-heading">
+    <div class="container">
+      <header class="section-header">
+        <h2 id="how-heading">How It Works</h2>
+        <p>Our multimodal deep learning pipeline</p>
+      </header>
+      <ol class="pipeline" aria-label="Processing pipeline steps">
+        <li class="pipe-step">
+          <div class="ps-num" aria-hidden="true">01</div>
+          <div class="ps-icon" aria-hidden="true">📥</div>
+          <h3>Input Collection</h3>
+          <p>Submit text, images, or videos — any combination is supported</p>
+        </li>
+        <li class="pipe-arrow" aria-hidden="true">→</li>
+        <li class="pipe-step">
+          <div class="ps-num" aria-hidden="true">02</div>
+          <div class="ps-icon" aria-hidden="true">🧠</div>
+          <h3>DL Analysis</h3>
+          <p>BERT for text; ELA + visual forensics for images; temporal sampling for video</p>
+        </li>
+        <li class="pipe-arrow" aria-hidden="true">→</li>
+        <li class="pipe-step">
+          <div class="ps-num" aria-hidden="true">03</div>
+          <div class="ps-icon" aria-hidden="true">⚡</div>
+          <h3>Multimodal Fusion</h3>
+          <p>Confidence-weighted combination of all modality predictions</p>
+        </li>
+        <li class="pipe-arrow" aria-hidden="true">→</li>
+        <li class="pipe-step">
+          <div class="ps-num" aria-hidden="true">04</div>
+          <div class="ps-icon" aria-hidden="true">✅</div>
+          <h3>Verdict &amp; Report</h3>
+          <p>Detailed breakdown with per-modality scores, indicators, and confidence</p>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <!-- ===================== ABOUT ===================== -->
+  <section class="about-section" id="about" aria-labelledby="about-heading">
+    <div class="container">
+      <div class="about-grid">
+        <div class="about-left">
+          <h2 id="about-heading">About VerifAI</h2>
+          <p>VerifAI is a multimodal fake news detection system built as a Deep Learning project. It leverages state-of-the-art transformer models and computer vision techniques to identify misinformation across text, image, and video content.</p>
+          <div class="tech-tags" aria-label="Technologies used">
+            <span class="tt">PyTorch</span><span class="tt">Transformers</span>
+            <span class="tt">BERT</span><span class="tt">OpenCV</span>
+            <span class="tt">Flask</span><span class="tt">ELA Analysis</span>
+            <span class="tt">NumPy</span><span class="tt">SciPy</span>
+          </div>
+        </div>
+        <div class="about-cards" role="list" aria-label="System components">
+          <div class="ac" role="listitem">
+            <span class="ac-icon" aria-hidden="true">📝</span>
+            <h4>Text Analysis</h4>
+            <p>BERT transformer fine-tuned on fake news datasets with linguistic feature fallback</p>
+          </div>
+          <div class="ac" role="listitem">
+            <span class="ac-icon" aria-hidden="true">🖼️</span>
+            <h4>Image Forensics</h4>
+            <p>Error Level Analysis (ELA), metadata inspection, and color channel consistency</p>
+          </div>
+          <div class="ac" role="listitem">
+            <span class="ac-icon" aria-hidden="true">🎥</span>
+            <h4>Video Analysis</h4>
+            <p>Temporal frame sampling with inter-frame consistency and anomaly detection</p>
+          </div>
+          <div class="ac" role="listitem">
+            <span class="ac-icon" aria-hidden="true">🔀</span>
+            <h4>Fusion Layer</h4>
+            <p>Confidence-weighted combination giving final probability and risk assessment</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== FOOTER ===================== -->
+  <footer class="footer" role="contentinfo">
+    <div class="container">
+      <div class="footer-inner">
+        <div class="footer-brand">
+          <span class="fb-logo">Verif<em>AI</em></span>
+          <p>Multimodal Fake News Detection System</p>
+          <p class="fb-sub">Deep Learning Project · PyTorch + HuggingFace + Flask</p>
+        </div>
+        <div class="footer-note">
+          <span aria-hidden="true">⚠️</span>
+          This tool is for educational &amp; research purposes.
+          Always verify information with multiple trusted sources.
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
