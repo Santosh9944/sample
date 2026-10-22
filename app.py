@@ -190,5 +190,6 @@ def health():
 
 if __name__ == "__main__":
     os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
-    log.info("Starting VerifAI server on http://localhost:5000")
-    app.run(debug=True, host="0.0.0.0", port=5000, use_reloader=False)
+    port = int(os.environ.get("PORT", 5000))
+    log.info("Starting VerifAI server on http://0.0.0.0:%d", port)
+    app.run(debug=False, host="0.0.0.0", port=port, use_reloader=False)
