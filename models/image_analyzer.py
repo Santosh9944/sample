@@ -374,17 +374,21 @@ class ImageAnalyzer:
     def _manipulation_score(self, ela, metadata, visual, compression, is_video_frame=False):
         # type: (Dict, Dict, Dict, Dict, bool) -> float
         score = 0.0
-        score += float(ela.get("ela_score", 0.3)) * 0.45
+        ela_val = float(ela.get("ela_score", 0.2))
+        score += ela_val * 0.50
+
+        if ela.get("suspicious"):
+            score += 0.20
 
         if not is_video_frame:
             if metadata.get("software_edit"):
-                score += 0.22
+                score += 0.35
             elif not metadata.get("has_exif"):
-                # Missing EXIF is only a minor clue for standalone JPEGs
-                score += 0.04
+                # Minor clue for standalone photos
+                score += 0.05
 
         score += float(min(visual.get("color_inconsistency", 0.0), 1.0)) * 0.15
-        score += float(compression.get("artifact_score", 0.0)) * 0.18
+        score += float(compression.get("artifact_score", 0.0)) * 0.15
 
         return float(np.clip(score, 0.04, 0.96))
 
