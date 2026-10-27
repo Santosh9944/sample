@@ -1,20 +1,25 @@
 # -*- coding: utf-8 -*-
 """
 VerifAI - Image Analyzer Module
-Uses Error Level Analysis (ELA), metadata inspection, and visual consistency
-checks to detect image manipulation / misinformation.
+Uses Error Level Analysis (ELA), metadata inspection, visual consistency,
+and face forensics to detect image manipulation / misinformation.
 """
 
 import io
 import os
 import numpy as np
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 
 class ImageAnalyzer:
     """
     Multi-technique image authenticity analyzer.
-    Primary technique: Error Level Analysis (ELA) -- no model download required.
+    Techniques:
+    - Error Level Analysis (ELA) for recompression / splicing artifacts
+    - EXIF metadata forensics (software tags, camera model, timestamps)
+    - Color channel distribution & visual consistency
+    - Multi-environment Face detection (Haar cascade with YCrCb chrominance fallback)
+    - JPEG 8x8 block grid compression artifact analysis
     """
 
     def __init__(self):
@@ -27,68 +32,80 @@ class ImageAnalyzer:
     # ------------------------------------------------------------------
 
     def _load_face_detector(self):
+        """Attempt to load OpenCV Haar cascade if available."""
         try:
             import cv2
-            path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-            if os.path.exists(path):
-                self.face_cascade = cv2.CascadeClassifier(path)
-                print("  [OK] Face detector ready")
-        except Exception as e:
-            print("  [WARN] Face detector unavailable: {}".format(e))
+            if hasattr(cv2, "data") and hasattr(cv2.data, "haarcascades") and hasattr(cv2, "CascadeClassifier"):
+                path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+                if os.path.exists(path):
+                    self.face_cascade = cv2.CascadeClassifier(path)
+                    print("  [OK] Haar face cascade detector ready")
+        except Exception:
+            self.face_cascade = None
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
-    def analyze(self, image_path):
-        # type: (str) -> Dict[str, Any]
+    def analyze(self, image_path, is_video_frame=False):
+        # type: (str, bool) -> Dict[str, Any]
         """Return full analysis dict for the image at *image_path*."""
         try:
             from PIL import Image
 
-            img = Image.open(image_path).convert("RGB")
+            # Keep raw format before color conversion
+            raw_img = Image.open(image_path)
+            orig_format = (raw_img.format or "").upper()
+            width, height = raw_img.size
 
-            ela = self._error_level_analysis(image_path)
-            metadata = self._extract_metadata(image_path, img)
+            # Working RGB image
+            img = raw_img.convert("RGB")
+
+            ela = self._error_level_analysis(image_path, img)
+            metadata = self._extract_metadata(image_path, raw_img, is_video_frame, orig_format)
             visual = self._visual_analysis(img)
-            faces = self._face_detection(image_path)
+            faces = self._face_detection(image_path, img)
             compression = self._compression_artifacts(img)
 
-            manip_score = self._manipulation_score(ela, metadata, visual, compression)
+            manip_score = self._manipulation_score(ela, metadata, visual, compression, is_video_frame)
 
             indicators = []
             if ela.get("ela_score", 0) > 0.35:
                 indicators.append(
-                    "High ELA inconsistency ({:.2f}) -- region(s) may be edited".format(
+                    "High ELA inconsistency ({:.2f}) -- image regions show re-compression or splicing".format(
                         ela["ela_score"]
                     )
                 )
-            if not metadata.get("has_exif") and img.format != "PNG":
-                indicators.append("Missing EXIF metadata -- possible re-save after editing")
+            if not is_video_frame and orig_format in ("JPEG", "JPG", "TIFF") and not metadata.get("has_exif"):
+                indicators.append("Missing camera EXIF metadata in photo file -- possible re-export after editing")
             if metadata.get("software_edit"):
                 indicators.append(
-                    "Editing software detected: {}".format(metadata.get("software", "Unknown"))
+                    "Editing software signature detected: {}".format(metadata.get("software", "Unknown"))
                 )
-            if compression.get("artifact_score", 0) > 0.5:
-                indicators.append("Unusual JPEG compression artifacts")
-            if visual.get("color_inconsistency", 0) > 0.4:
-                indicators.append("Color-channel inconsistency -- possible compositing")
+            if compression.get("artifact_score", 0) > 0.45:
+                indicators.append("Irregular 8x8 block compression artifacts detected")
+            if visual.get("color_inconsistency", 0) > 0.40:
+                indicators.append("Significant color-channel distribution discrepancy -- possible compositing")
+            if faces.get("faces_detected") and faces.get("face_count", 0) > 4:
+                indicators.append("Crowd / multi-face scene detected ({} face candidates)".format(faces["face_count"]))
 
-            fake_prob = float(np.clip(manip_score, 0.02, 0.98))
+            fake_prob = float(np.clip(manip_score, 0.03, 0.97))
+            real_prob = 1.0 - fake_prob
+            verdict = "FAKE" if fake_prob > 0.50 else "REAL"
 
             return {
-                "verdict": "FAKE" if fake_prob > 0.5 else "REAL",
+                "verdict": verdict,
                 "fake_probability": round(fake_prob, 4),
-                "real_probability": round(1.0 - fake_prob, 4),
-                "confidence": round(max(fake_prob, 1.0 - fake_prob), 4),
+                "real_probability": round(real_prob, 4),
+                "confidence": round(max(fake_prob, real_prob), 4),
                 "ela_analysis": ela,
                 "metadata": metadata,
                 "visual_analysis": visual,
                 "face_detection": faces,
                 "compression_analysis": compression,
                 "manipulation_indicators": indicators,
-                "image_size": "{}x{}".format(img.width, img.height),
-                "image_format": str(img.format or "unknown"),
+                "image_size": "{}x{}".format(width, height),
+                "image_format": orig_format or "JPEG",
             }
 
         except FileNotFoundError:
@@ -100,26 +117,45 @@ class ImageAnalyzer:
     # ELA -- Error Level Analysis
     # ------------------------------------------------------------------
 
-    def _error_level_analysis(self, image_path):
-        # type: (str) -> Dict[str, Any]
+    def _error_level_analysis(self, image_path, original_rgb):
+        # type: (str, Any) -> Dict[str, Any]
         """
-        Compare the original image with a re-compressed version.
-        Edited regions typically show higher error levels.
+        Compare original image with JPEG re-compressed versions.
+        Evaluates both global error and localized block-level discrepancy (splicing/cloning).
         """
         try:
             from PIL import Image, ImageChops
 
-            original = Image.open(image_path).convert("RGB")
             scores_by_quality = []
+            block_ratios = []
+            block_maxes = []
 
             for quality in (75, 85, 90):
                 buf = io.BytesIO()
-                original.save(buf, format="JPEG", quality=quality)
+                original_rgb.save(buf, format="JPEG", quality=quality)
                 buf.seek(0)
                 recomp = Image.open(buf).convert("RGB")
 
-                diff = ImageChops.difference(original, recomp)
+                diff = ImageChops.difference(original_rgb, recomp)
                 diff_arr = np.asarray(diff, dtype=float)
+                # 2D error intensity map
+                err_map = diff_arr.mean(axis=2)
+
+                # Localized block variance (16x16 blocks)
+                h, w = err_map.shape
+                bs = 16
+                b_means = []
+                for y in range(0, max(h - bs, 1), bs):
+                    for x in range(0, max(w - bs, 1), bs):
+                        b_means.append(float(err_map[y: y + bs, x: x + bs].mean()))
+
+                if b_means:
+                    b_arr = np.array(b_means)
+                    b_mean = float(b_arr.mean())
+                    b_max = float(b_arr.max())
+                    reg_ratio = float((b_max - b_mean) / (b_mean + 10.0))
+                    block_ratios.append(reg_ratio)
+                    block_maxes.append(b_max)
 
                 scores_by_quality.append(
                     {
@@ -132,57 +168,65 @@ class ImageAnalyzer:
 
             avg_mean = float(np.mean([s["mean"] for s in scores_by_quality]))
             avg_std = float(np.mean([s["std"] for s in scores_by_quality]))
+            avg_ratio = float(np.mean(block_ratios)) if block_ratios else 0.0
+            avg_block_max = float(np.mean(block_maxes)) if block_maxes else avg_mean
 
-            # Normalise to [0, 1]
-            ela_score = float(np.clip(avg_mean / 255.0 * 12 + avg_std / 255.0 * 4, 0, 1))
+            # Spliced regions create high block contrast (> 0.35) and elevated peak error (> 6.0)
+            localized_anomaly = max(0.0, (avg_ratio - 0.25) / 0.50)
+            base_err = (avg_mean / 255.0) * 8.0 + (avg_std / 255.0) * 3.0
+
+            ela_score = float(np.clip(base_err + localized_anomaly * 0.35, 0.0, 1.0))
 
             return {
                 "ela_score": round(ela_score, 4),
                 "ela_mean": round(avg_mean, 4),
                 "ela_std": round(avg_std, 4),
+                "block_ratio": round(avg_ratio, 3),
+                "block_max": round(avg_block_max, 2),
                 "quality_scores": scores_by_quality,
-                "suspicious": ela_score > 0.3,
+                "suspicious": ela_score > 0.35 or avg_ratio > 0.50,
             }
         except Exception as e:
-            return {"ela_score": 0.5, "error": str(e), "suspicious": False}
+            return {"ela_score": 0.25, "error": str(e), "suspicious": False}
 
     # ------------------------------------------------------------------
-    # Metadata
+    # Metadata Inspection
     # ------------------------------------------------------------------
 
-    def _extract_metadata(self, image_path, img):
-        # type: (str, Any) -> Dict[str, Any]
+    def _extract_metadata(self, image_path, raw_img, is_video_frame, orig_format):
+        # type: (str, Any, bool, str) -> Dict[str, Any]
         try:
             from PIL.ExifTags import TAGS
 
             has_exif = False
             software_edit = False
             software = ""
-            exif_fields = {}   # type: Dict[str, str]
+            exif_fields = {}
 
-            raw_exif_fn = getattr(img, "_getexif", None)
-            raw_exif = raw_exif_fn() if raw_exif_fn else None
+            if not is_video_frame:
+                raw_exif_fn = getattr(raw_img, "_getexif", None)
+                raw_exif = raw_exif_fn() if raw_exif_fn else None
 
-            if raw_exif:
-                has_exif = True
-                for tag_id, value in raw_exif.items():
-                    tag_name = TAGS.get(tag_id, str(tag_id))
-                    if tag_name == "Software":
-                        software = str(value)
-                        edit_sw = [
-                            "photoshop", "gimp", "lightroom", "premiere",
-                            "aftereffects", "davinci", "pixlr", "canva",
-                            "snapseed", "vsco", "paint",
-                        ]
-                        if any(sw in software.lower() for sw in edit_sw):
-                            software_edit = True
-                    if tag_name in ("Make", "Model", "Software", "DateTime"):
-                        exif_fields[tag_name] = str(value)[:80]
+                if raw_exif:
+                    has_exif = True
+                    for tag_id, value in raw_exif.items():
+                        tag_name = TAGS.get(tag_id, str(tag_id))
+                        if tag_name == "Software":
+                            software = str(value)
+                            edit_sw = [
+                                "photoshop", "gimp", "lightroom", "premiere",
+                                "aftereffects", "davinci", "pixlr", "canva",
+                                "snapseed", "vsco", "paint.net", "picsart",
+                            ]
+                            if any(sw in software.lower() for sw in edit_sw):
+                                software_edit = True
+                        if tag_name in ("Make", "Model", "Software", "DateTime"):
+                            exif_fields[tag_name] = str(value)[:80]
 
             try:
                 file_size_kb = round(os.path.getsize(image_path) / 1024, 1)
             except Exception:
-                file_size_kb = 0
+                file_size_kb = 0.0
 
             return {
                 "has_exif": has_exif,
@@ -192,10 +236,10 @@ class ImageAnalyzer:
                 "file_size_kb": file_size_kb,
             }
         except Exception as e:
-            return {"has_exif": False, "error": str(e), "software_edit": False}
+            return {"has_exif": False, "error": str(e), "software_edit": False, "file_size_kb": 0.0}
 
     # ------------------------------------------------------------------
-    # Visual Analysis
+    # Visual Consistency Analysis
     # ------------------------------------------------------------------
 
     def _visual_analysis(self, img):
@@ -226,36 +270,66 @@ class ImageAnalyzer:
             return {"color_inconsistency": 0.1, "error": str(e)}
 
     # ------------------------------------------------------------------
-    # Face Detection
+    # Face Detection (Multi-Strategy)
     # ------------------------------------------------------------------
 
-    def _face_detection(self, image_path):
-        # type: (str) -> Dict[str, Any]
-        if self.face_cascade is None:
-            return {"face_count": 0, "faces_detected": False, "available": False}
-        try:
-            import cv2
+    def _face_detection(self, image_path, pil_img):
+        # type: (str, Any) -> Dict[str, Any]
+        """
+        Detect face regions using Haar cascade if available,
+        or robust skin-chrominance blob analysis as a universal fallback.
+        """
+        # Strategy 1: OpenCV Haar Cascade if loaded
+        if self.face_cascade is not None:
+            try:
+                import cv2
+                img = cv2.imread(image_path)
+                if img is not None:
+                    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                    faces = self.face_cascade.detectMultiScale(
+                        gray, scaleFactor=1.1, minNeighbors=4, minSize=(30, 30)
+                    )
+                    count = int(len(faces)) if hasattr(faces, "__len__") else 0
+                    return {
+                        "face_count": count,
+                        "faces_detected": count > 0,
+                        "method": "HaarCascade",
+                        "available": True,
+                    }
+            except Exception:
+                pass
 
-            img = cv2.imread(image_path)
-            if img is None:
-                return {"face_count": 0, "faces_detected": False, "error": "unreadable"}
-            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            faces = self.face_cascade.detectMultiScale(
-                gray, scaleFactor=1.1, minNeighbors=4, minSize=(30, 30)
-            )
-            count = int(len(faces)) if hasattr(faces, "__len__") else 0
+        # Strategy 2: Universal skin-chrominance (YCrCb) face candidate detector
+        try:
+            arr = np.asarray(pil_img, dtype=float)
+            # YCrCb conversion:
+            # Y  = 0.299R + 0.587G + 0.114B
+            # Cr = (R - Y) * 0.713 + 128
+            # Cb = (B - Y) * 0.564 + 128
+            r, g, b = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2]
+            y = 0.299 * r + 0.587 * g + 0.114 * b
+            cr = (r - y) * 0.713 + 128
+            cb = (b - y) * 0.564 + 128
+
+            # Human skin locus in YCrCb: Cr in [133, 173], Cb in [77, 127]
+            skin_mask = (cr >= 133) & (cr <= 173) & (cb >= 77) & (cb <= 127)
+            total_pixels = float(skin_mask.size)
+            skin_ratio = float(np.sum(skin_mask)) / total_pixels
+
+            # Estimate portrait/face presence based on skin cluster density
+            estimated_faces = 0
+            if skin_ratio > 0.04:
+                # Moderate/large skin clusters indicate 1 or more portrait subjects
+                estimated_faces = 1 if skin_ratio < 0.28 else 2
+
             return {
-                "face_count": count,
-                "faces_detected": count > 0,
+                "face_count": estimated_faces,
+                "faces_detected": estimated_faces > 0,
+                "method": "ChrominanceAnalysis",
                 "available": True,
-                "note": (
-                    "Multiple faces detected - verify context"
-                    if count > 3
-                    else ""
-                ),
             }
         except Exception as e:
-            return {"face_count": 0, "faces_detected": False, "error": str(e)}
+            return {"face_count": 0, "faces_detected": False, "method": "None", "error": str(e)}
 
     # ------------------------------------------------------------------
     # Compression Artifacts
@@ -281,7 +355,7 @@ class ImageAnalyzer:
 
             if diffs:
                 avg_diff = float(np.mean(diffs))
-                artifact_score = float(np.clip(avg_diff / 30.0, 0, 1))
+                artifact_score = float(np.clip(avg_diff / 30.0, 0.0, 1.0))
             else:
                 avg_diff = 0.0
                 artifact_score = 0.0
@@ -291,23 +365,28 @@ class ImageAnalyzer:
                 "avg_block_diff": round(avg_diff, 2),
             }
         except Exception as e:
-            return {"artifact_score": 0.2, "error": str(e)}
+            return {"artifact_score": 0.15, "error": str(e)}
 
     # ------------------------------------------------------------------
     # Score Fusion
     # ------------------------------------------------------------------
 
-    def _manipulation_score(self, ela, metadata, visual, compression):
-        # type: (Dict, Dict, Dict, Dict) -> float
+    def _manipulation_score(self, ela, metadata, visual, compression, is_video_frame=False):
+        # type: (Dict, Dict, Dict, Dict, bool) -> float
         score = 0.0
-        score += float(ela.get("ela_score", 0.5)) * 0.40
-        if not metadata.get("has_exif"):
-            score += 0.08
-        if metadata.get("software_edit"):
-            score += 0.15
-        score += float(min(visual.get("color_inconsistency", 0), 1.0)) * 0.17
-        score += float(compression.get("artifact_score", 0)) * 0.20
-        return score
+        score += float(ela.get("ela_score", 0.3)) * 0.45
+
+        if not is_video_frame:
+            if metadata.get("software_edit"):
+                score += 0.22
+            elif not metadata.get("has_exif"):
+                # Missing EXIF is only a minor clue for standalone JPEGs
+                score += 0.04
+
+        score += float(min(visual.get("color_inconsistency", 0.0), 1.0)) * 0.15
+        score += float(compression.get("artifact_score", 0.0)) * 0.18
+
+        return float(np.clip(score, 0.04, 0.96))
 
     # ------------------------------------------------------------------
     # Helpers

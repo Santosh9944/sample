@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 VerifAI - Video Analyzer Module
-Samples frames from a video and runs image-level analysis on each frame.
-Temporal consistency is used as an additional fake signal.
+Samples frames from a video and runs image-level forensics on each frame.
+Temporal consistency and frame anomalies are used to detect manipulation / deepfakes.
 """
 
 import os
@@ -14,7 +14,7 @@ from typing import Dict, Any, List
 class VideoAnalyzer:
     """
     Frame-sampled video authenticity analyzer.
-    Re-uses ImageAnalyzer under the hood.
+    Analyzes temporal continuity, frame-level ELA, and anomalous frame spikes.
     """
 
     MAX_FRAMES = 12          # Max frames to sample
@@ -46,11 +46,11 @@ class VideoAnalyzer:
             fps = float(cap.get(cv2.CAP_PROP_FPS)) or 24.0
             width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            duration = total_frames / fps
+            duration = max(total_frames / fps, 0.1) if total_frames > 0 else 0.1
 
             # Sample frames uniformly
             sample_count = min(self.MAX_FRAMES, max(1, total_frames))
-            frame_indices = np.linspace(0, total_frames - 1, sample_count, dtype=int)
+            frame_indices = np.linspace(0, max(total_frames - 1, 0), sample_count, dtype=int)
 
             frame_results = []   # type: List[Dict]
             temp_files = []      # type: List[str]
@@ -67,7 +67,8 @@ class VideoAnalyzer:
                     tmp.close()
                     temp_files.append(tmp.name)
 
-                    result = self.image_analyzer.analyze(tmp.name)
+                    # Pass is_video_frame=True to avoid false-positive EXIF penalties
+                    result = self.image_analyzer.analyze(tmp.name, is_video_frame=True)
                     frame_results.append(
                         {
                             "frame_index": int(idx),
@@ -89,7 +90,8 @@ class VideoAnalyzer:
             # Cleanup temp files
             for f in temp_files:
                 try:
-                    os.unlink(f)
+                    if os.path.exists(f):
+                        os.unlink(f)
                 except Exception:
                     pass
 
@@ -119,13 +121,14 @@ class VideoAnalyzer:
         fake_probs = np.array([r["fake_probability"] for r in frame_results])
         avg_fake = float(fake_probs.mean())
         fake_std = float(fake_probs.std())
+        peak_fake = float(np.max(fake_probs)) if len(fake_probs) else avg_fake
 
-        # Temporal consistency: low std -> consistent; high std -> suspicious
-        temporal_consistency = float(max(0.0, 1.0 - fake_std * 2.0))
+        # Temporal consistency: low std -> stable frames; high std -> possible spliced edits
+        temporal_consistency = float(np.clip(1.0 - fake_std * 2.5, 0.05, 1.0))
 
-        # Anomalous frames
-        threshold = avg_fake + self.ANOMALY_THRESHOLD * fake_std
-        anomalous = [r for r in frame_results if r["fake_probability"] > threshold]
+        # Anomalous frames: must be both statistical outliers AND above moderate fake threshold
+        anomaly_threshold = max(avg_fake + 0.15, avg_fake + self.ANOMALY_THRESHOLD * fake_std)
+        anomalous = [r for r in frame_results if r["fake_probability"] >= anomaly_threshold and r["fake_probability"] > 0.40]
 
         # Collect unique indicators
         all_indicators = []  # type: List[str]
@@ -133,24 +136,32 @@ class VideoAnalyzer:
             all_indicators.extend(r["manipulation_indicators"])
         all_indicators = list(dict.fromkeys(all_indicators))[:6]
 
-        if fake_std > 0.25:
+        if fake_std > 0.18:
             all_indicators.append(
-                "High variance between frames - possible selective editing"
+                "High temporal variance between frames -- possible selective segment tampering"
             )
-        if len(anomalous) > len(frame_results) * 0.3:
+        if len(anomalous) > 0:
             all_indicators.append(
-                "{} of {} frames show elevated fake signals".format(
+                "{} of {} sampled frames show elevated manipulation signals".format(
                     len(anomalous), len(frame_results)
                 )
             )
 
-        fake_prob = float(np.clip(avg_fake, 0.02, 0.98))
+        # Blended fake probability: 70% average frame score + 30% peak frame score
+        # plus temporal variance penalty
+        blended_fake = 0.70 * avg_fake + 0.30 * peak_fake
+        if fake_std > 0.18:
+            blended_fake += min((fake_std - 0.18) * 0.4, 0.12)
+
+        fake_prob = float(np.clip(blended_fake, 0.04, 0.96))
+        real_prob = 1.0 - fake_prob
+        verdict = "FAKE" if fake_prob > 0.50 else "REAL"
 
         return {
-            "verdict": "FAKE" if fake_prob > 0.5 else "REAL",
+            "verdict": verdict,
             "fake_probability": round(fake_prob, 4),
-            "real_probability": round(1.0 - fake_prob, 4),
-            "confidence": round(max(fake_prob, 1.0 - fake_prob), 4),
+            "real_probability": round(real_prob, 4),
+            "confidence": round(max(fake_prob, real_prob), 4),
             "video_info": {
                 "duration_sec": round(duration, 2),
                 "fps": round(fps, 2),
@@ -181,5 +192,5 @@ class VideoAnalyzer:
             "real_probability": 0.5,
             "confidence": 0.5,
             "error": message,
-            "manipulation_indicators": [],
+            "manipulation_indicators": ["Video error: {}".format(message)],
         }
