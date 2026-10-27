@@ -2,7 +2,7 @@
 echo ============================================
 echo   VerifAI - Launching Flask Web App
 echo ============================================
-cd /d "c:\Users\santo\OneDrive\Desktop\DL PROJECT"
+cd /d "%~dp0"
 echo.
 echo Starting VerifAI web server...
 echo Open your browser at: http://localhost:5000
