@@ -66,8 +66,9 @@ class ImageAnalyzer:
             visual = self._visual_analysis(img)
             faces = self._face_detection(image_path, img)
             compression = self._compression_artifacts(img)
+            overlays = self._detect_synthetic_overlays(image_path)
 
-            manip_score = self._manipulation_score(ela, metadata, visual, compression, is_video_frame)
+            manip_score = self._manipulation_score(ela, metadata, visual, compression, overlays, is_video_frame)
 
             indicators = []
             if ela.get("ela_score", 0) > 0.35:
@@ -82,6 +83,8 @@ class ImageAnalyzer:
                 indicators.append(
                     "Editing software signature detected: {}".format(metadata.get("software", "Unknown"))
                 )
+            if overlays.get("detected"):
+                indicators.extend(overlays.get("indicators", []))
             if compression.get("artifact_score", 0) > 0.45:
                 indicators.append("Irregular 8x8 block compression artifacts detected")
             if visual.get("color_inconsistency", 0) > 0.40:
@@ -368,17 +371,90 @@ class ImageAnalyzer:
             return {"artifact_score": 0.15, "error": str(e)}
 
     # ------------------------------------------------------------------
+    # Synthetic Overlay & Banner Forensics
+    # ------------------------------------------------------------------
+
+    def _detect_synthetic_overlays(self, image_path):
+        # type: (str) -> Dict[str, Any]
+        """
+        Detect machine-generated rectangular banners, emergency strips, and graphic overlays
+        composited onto the image (common in doctored images and fake news memes).
+        """
+        try:
+            import cv2
+            img = cv2.imread(image_path)
+            if img is None:
+                return {"detected": False, "overlay_score": 0.0, "indicators": []}
+
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            h, w = gray.shape
+            img_area = float(h * w)
+
+            edges = cv2.Canny(gray, 40, 140)
+            contours, _ = cv2.findContours(edges, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+
+            detected_banners = []
+            indicators = []
+            max_overlay_score = 0.0
+
+            for cnt in contours:
+                area = cv2.contourArea(cnt)
+                if area < (img_area * 0.12) or area > (img_area * 0.92):
+                    continue
+                peri = cv2.arcLength(cnt, True)
+                approx = cv2.approxPolyDP(cnt, 0.025 * peri, True)
+
+                if len(approx) == 4:
+                    x, y, cw, ch = cv2.boundingRect(approx)
+                    aspect = float(cw) / max(ch, 1)
+                    rect_area = float(cw * ch)
+                    solidity = area / rect_area if rect_area > 0 else 0
+
+                    # Rectangular overlay with banner aspect ratio
+                    if solidity > 0.90 and (aspect > 1.4 or aspect < 0.7):
+                        mask = np.zeros((h, w), dtype=np.uint8)
+                        cv2.drawContours(mask, [approx], -1, 255, -1)
+
+                        inner_edges = cv2.bitwise_and(edges, edges, mask=mask)
+                        inner_strokes = float(np.sum(inner_edges > 0)) / area
+
+                        # High internal text / graphic stroke density
+                        if inner_strokes > 0.035:
+                            area_pct = round((area / img_area) * 100, 1)
+                            score = float(np.clip(0.40 + (area / img_area) * 0.40, 0.45, 0.75))
+                            max_overlay_score = max(max_overlay_score, score)
+                            detected_banners.append(area_pct)
+
+            if detected_banners:
+                top_pct = max(detected_banners)
+                indicators.append(
+                    "Doctored banner / synthetic graphic overlay detected (covers {:.1f}% of image)".format(top_pct)
+                )
+                indicators.append("Dense machine-rendered text strokes identified within overlaid bounding box")
+
+            return {
+                "detected": len(detected_banners) > 0,
+                "overlay_score": round(max_overlay_score, 4),
+                "indicators": indicators,
+            }
+        except Exception:
+            return {"detected": False, "overlay_score": 0.0, "indicators": []}
+
+    # ------------------------------------------------------------------
     # Score Fusion
     # ------------------------------------------------------------------
 
-    def _manipulation_score(self, ela, metadata, visual, compression, is_video_frame=False):
-        # type: (Dict, Dict, Dict, Dict, bool) -> float
+    def _manipulation_score(self, ela, metadata, visual, compression, overlays=None, is_video_frame=False):
+        # type: (Dict, Dict, Dict, Dict, Optional[Dict], bool) -> float
         score = 0.0
         ela_val = float(ela.get("ela_score", 0.2))
         score += ela_val * 0.50
 
         if ela.get("suspicious"):
             score += 0.20
+
+        if overlays and overlays.get("detected"):
+            score += float(overlays.get("overlay_score", 0.45))
 
         if not is_video_frame:
             if metadata.get("software_edit"):
